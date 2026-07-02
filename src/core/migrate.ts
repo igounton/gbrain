@@ -5439,6 +5439,72 @@ export const MIGRATIONS: Migration[] = [
       `,
     },
   },
+  {
+    version: 121,
+    name: 'timeline_entries_event_page_id',
+    // v0.42.x — Life Chronicle (#2390): the event→timeline projection pointer.
+    // A `type:event` page projects ONE date-index row into timeline_entries
+    // keyed to the depth/meeting page (page_id), with event_page_id pointing at
+    // the event page itself. Additive + idempotent: nullable FK + partial
+    // indexes; legacy rows keep event_page_id NULL so existing behavior is
+    // unchanged. The partial UNIQUE(event_page_id, date) makes re-extraction
+    // with a changed summary an UPDATE (not a duplicate). FK added via a guarded
+    // DO block (mirrors the facts_source_id_fkey pattern) so the ALTER is a
+    // no-op on re-runs. Mirrored in src/schema.sql, src/core/pglite-schema.ts,
+    // and the generated src/core/schema-embedded.ts for fresh installs.
+    idempotent: true,
+    sql: `
+      ALTER TABLE timeline_entries ADD COLUMN IF NOT EXISTS event_page_id INTEGER;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conname = 'timeline_entries_event_page_id_fkey'
+             AND conrelid = 'timeline_entries'::regclass
+        ) THEN
+          ALTER TABLE timeline_entries
+            ADD CONSTRAINT timeline_entries_event_page_id_fkey
+            FOREIGN KEY (event_page_id) REFERENCES pages(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+
+      CREATE INDEX IF NOT EXISTS idx_timeline_event_page
+        ON timeline_entries(event_page_id) WHERE event_page_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_event_dedup
+        ON timeline_entries(event_page_id, date) WHERE event_page_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 122,
+    name: 'facts_ontology_dimension',
+    // v0.42.x — Life Chronicle (#2390): the per-entity ontology rides the
+    // existing `facts` table. facts already gives bi-temporal validity
+    // (valid_from/valid_until/expired_at), supersession (superseded_by),
+    // remote redaction (visibility), confidence, provenance (source_markdown_slug),
+    // embedding, and corroboration (consolidated_into). The ONLY genuinely-new
+    // concept is a typed `dimension` (e.g. role, risk_tolerance) carrying a
+    // resolved `value` + a deterministic `value_hash` dedup key, plus a
+    // `dim_status` for quarantining novel/LLM-proposed dimensions. Plain facts
+    // keep dimension NULL → unchanged behavior. The partial UNIQUE is
+    // deterministic (no timestamp) so a crash-retry is idempotent. Additive;
+    // facts is migration-created (absent from static schema), so this migration
+    // is the single source for fresh + migrated brains.
+    idempotent: true,
+    sql: `
+      ALTER TABLE facts ADD COLUMN IF NOT EXISTS dimension  TEXT;
+      ALTER TABLE facts ADD COLUMN IF NOT EXISTS value      TEXT;
+      ALTER TABLE facts ADD COLUMN IF NOT EXISTS value_hash TEXT;
+      ALTER TABLE facts ADD COLUMN IF NOT EXISTS dim_status TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_facts_dimension
+        ON facts(source_id, entity_slug, dimension, valid_from DESC)
+        WHERE expired_at IS NULL AND dimension IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_ontology_dedup
+        ON facts(source_id, entity_slug, dimension, value_hash, source_markdown_slug)
+        WHERE dimension IS NOT NULL;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

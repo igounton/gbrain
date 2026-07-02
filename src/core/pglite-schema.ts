@@ -371,6 +371,9 @@ CREATE TABLE IF NOT EXISTS timeline_entries (
   source   TEXT    NOT NULL DEFAULT '',
   summary  TEXT    NOT NULL,
   detail   TEXT    NOT NULL DEFAULT '',
+  -- v0.42.x (Life Chronicle #2390): event-projection pointer. NULL for
+  -- ordinary rows. See src/schema.sql for the full rationale.
+  event_page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -380,6 +383,9 @@ CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_entries(date);
 -- v0.41.18.0 (codex finding #11): widened to include source so distinct
 -- meeting provenance survives. Legacy rows have source='' (schema default).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_dedup ON timeline_entries(page_id, date, summary, source);
+-- v0.42.x (Life Chronicle): event-projection lookup + dedup (partial).
+CREATE INDEX IF NOT EXISTS idx_timeline_event_page ON timeline_entries(event_page_id) WHERE event_page_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_event_dedup ON timeline_entries(event_page_id, date) WHERE event_page_id IS NOT NULL;
 
 -- ============================================================
 -- page_versions: snapshot history

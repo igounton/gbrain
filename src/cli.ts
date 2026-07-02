@@ -1396,6 +1396,14 @@ async function handleCliOnly(command: string, args: string[]) {
     return;
   }
 
+  // v0.42.x (#2390): `gbrain eval chronicle` is deterministic — brings its own
+  // in-memory PGLite, no DB/gateway. CI fixture gate runs anywhere.
+  if (command === 'eval' && args[0] === 'chronicle') {
+    const { runEvalChronicle } = await import('./commands/eval-chronicle.ts');
+    setCliExitVerdict(await runEvalChronicle(args.slice(1)));
+    return;
+  }
+
   // v0.41.13.0: `gbrain eval conversation-parser` is pure-function
   // (parses fixture JSONL, runs parseConversation, scores results).
   // No DB access; bypass connectEngine entirely so the CI fixture

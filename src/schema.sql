@@ -536,6 +536,13 @@ CREATE TABLE IF NOT EXISTS timeline_entries (
   source   TEXT    NOT NULL DEFAULT '',
   summary  TEXT    NOT NULL,
   detail   TEXT    NOT NULL DEFAULT '',
+  -- v0.42.x (Life Chronicle #2390): when this row is the date-index projection
+  -- of a `type:event` page, event_page_id points at that event page; page_id
+  -- stays the depth/meeting page. NULL for ordinary timeline entries. Reads
+  -- hide rows whose event page is soft-deleted; the partial unique index below
+  -- keys dedup on (event_page_id, date) so re-extraction with a changed summary
+  -- updates the row instead of double-inserting.
+  event_page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -545,6 +552,10 @@ CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_entries(date);
 -- include `source` so distinct meeting provenance survives. Legacy rows
 -- have source='' (schema default) so legacy dedup behavior is preserved.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_dedup ON timeline_entries(page_id, date, summary, source);
+-- v0.42.x (Life Chronicle): event-projection lookup + dedup. Partial
+-- (event_page_id IS NOT NULL) so ordinary timeline rows are unaffected.
+CREATE INDEX IF NOT EXISTS idx_timeline_event_page ON timeline_entries(event_page_id) WHERE event_page_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_event_dedup ON timeline_entries(event_page_id, date) WHERE event_page_id IS NOT NULL;
 
 -- ============================================================
 -- page_versions: snapshot history for compiled_truth
